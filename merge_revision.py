@@ -7,20 +7,7 @@ logging.getLogger().setLevel("INFO")
 
 
 def condense_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Takes an input dataframe with revision and reference columns, and outputs
-    a dataframe which only include those lines that are not blank in both input files.
-    Also condenses <range> lines into the previous line in both revision and reference, 
-    and removes the vref for that line, adding the removed indices into the 'indices'
-    column, so you know which indices have been combined.
 
-    Inputs:
-    df                 A dataframe with vref, revision and reference columns
-
-    Outputs:
-    df                  The condensed dataframe
-
-    """
     df["indices"] = df.index
     df.loc[:, "indices"] = df["indices"].apply(lambda x: str(x))
     df.loc[:, "reference"] = df["reference"].apply(lambda x: str(x))

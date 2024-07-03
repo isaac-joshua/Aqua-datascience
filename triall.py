@@ -1,6 +1,6 @@
 import math
 import os
-from typing import Literal, Optional, List, Union
+from typing import Literal, Optional, List
 import pandas as pd
 import modal
 from pydantic import BaseModel
@@ -21,11 +21,11 @@ App = modal.App(
     "semantic-similarity" + suffix,
     image=modal.Image.debian_slim()
     .pip_install(
-        "pandas~=1.5.0", "torch~=2.1.0", "transformers~=4.34.0", "tqdm~=4.66.0"
+        "pandas==1.5.0", "torch==2.1.0", "transformers==4.34.0", "tqdm==4.66.0"
     )
     .copy_mount(
-        modal.Mount.from_local_file(
-            local_path="vref.txt"
+        modal.Mount.from_local_dir(
+            local_path="data", remote_path="/root/data"
         )
     )
     .copy_mount(
@@ -36,18 +36,14 @@ App = modal.App(
     .env(image_envs),
 )
 
-App.run_pull_rev = modal.Function.from_name("pull-revision" + suffix, "pull_revision")
-
-print("ef")
 class Assessment(BaseModel):
     id: Optional[int] = None
     revision_id: int
     reference_id: int
     type: Literal["semantic-similarity"]
 
-
 @App.function(
-    timeout=3600,  
+    timeout=3600,
     secrets=[modal.Secret.from_dict({"TRANSFORMERS_CACHE": CACHE_PATH})],
     network_file_systems={CACHE_PATH: volume},
 )
@@ -81,7 +77,6 @@ def get_labse_model(cache_path=CACHE_PATH):
 
     return semsim_model, semsim_tokenizer
 
-
 @App.function(timeout=600, retries=3, cpu=8)
 def get_sim_scores(
     rev_sents_output: List[str],
@@ -112,13 +107,11 @@ def get_sim_scores(
 
     return sim_scores
 
-
 @App.function()
 def get_text(file_path: str):
-     with open(file_path, 'r') as file:
+    with open(file_path, 'r') as file:
         content = file.read()
         return content
-   
 
 @App.function()
 def merge(revision_id, revision_verses, reference_id, reference_verses):
@@ -127,36 +120,41 @@ def merge(revision_id, revision_verses, reference_id, reference_verses):
     mr = MergeRevision(revision_id, revision_verses, reference_id, reference_verses)
     return mr.merge_revision()
 
-
 @App.function(timeout=3600, network_file_systems={"/root/cache": volume}, cpu=8)
-def assess(assessment: Union[Assessment, dict], **kwargs):
+def assess():
     from tqdm import tqdm
+    
+    assessment = {
+        "revision_id": 1, 
+        "reference_id": 1, 
+        "type": "semantic-similarity"
+    }
 
     if isinstance(assessment, dict):
         assessment = Assessment(**assessment)
         
     # Paths to text files on the system
-    revision_file_path = "aai-aai.txt"
-    reference_file_path = "aai-aai.txt"
+    revision_file_path = "/root/data/aai-aai.txt"
+    reference_file_path = "/root/data/aai-aai.txt"
     
-    revision = get_text.remote(revision_file_path)
-    reference = get_text.remote(reference_file_path)
+    revision_text = get_text.remote(revision_file_path)
+    reference_text = get_text.remote(reference_file_path)
 
+    # Create DataFrames from text files
+    revision_lines = revision_text.split('\n')
+    reference_lines = reference_text.split('\n')
 
-    files = [assessment.revision_id, revision, assessment.reference_id, reference]
-    merge_keys = ['revision_id', 'revision_verses', 'reference_id', 'reference_verses']
+    revision_df = pd.DataFrame(revision_lines, columns=["revision"])
+    reference_df = pd.DataFrame(reference_lines, columns=["reference"])
 
-    dfs = [pd.read_csv(file, delimiter=',') for file in files]
-    merged_df = dfs[0]
-    for df, key in zip(dfs[1:], merge_keys):
-        merged_df = pd.merge(merged_df, df, on=key)
+    # Merge the DataFrames (assuming you want to concatenate them along the columns)
+    merged_df = pd.concat([revision_df, reference_df], axis=1)
     print(merged_df.size)
 
-
     batch_size = 256
-    rev_sents = df["revision"].to_list()
-    ref_sents = df["reference"].to_list()
-    vrefs = df.index.to_list()
+    rev_sents = merged_df["revision"].to_list()
+    ref_sents = merged_df["reference"].to_list()
+    vrefs = merged_df.index.to_list()
     assessment_id = [assessment.id] * len(vrefs)
     rev_sents_batched = [
         rev_sents[i : i + batch_size] for i in range(0, len(rev_sents), batch_size)
@@ -165,19 +163,18 @@ def assess(assessment: Union[Assessment, dict], **kwargs):
         ref_sents[i : i + batch_size] for i in range(0, len(ref_sents), batch_size)
     ]
     semsim_model, semsim_tokenizer = get_labse_model.remote()
-    sim_scores = tqdm(
+    sim_scores = list(tqdm(
         get_sim_scores.map(
             rev_sents_batched,
             ref_sents_batched,
             kwargs={"semsim_model": semsim_model, "semsim_tokenizer": semsim_tokenizer},
         )
-    )
+    ))
 
     sim_scores = [item for sublist in sim_scores for item in sublist]
 
     results = [
         {
-            "assessment_id": assessment_id[j],
             "vref": vrefs[j],
             "score": sim_scores[j] if not math.isnan(sim_scores[j]) else 0,
         }
@@ -188,3 +185,6 @@ def assess(assessment: Union[Assessment, dict], **kwargs):
 
     return {"results": results}
 
+@App.local_entrypoint()
+def main():
+    assess.remote()
