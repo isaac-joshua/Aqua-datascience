@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Literal
 import torch
 from laserembeddings import Laser
-from test import merge_files
+from test import merge_files, removeverse
 
 class Assessment(BaseModel):
     id: Optional[int] = None
@@ -87,6 +87,7 @@ def get_line_numbers_from_vref(file_path: str):
                 line_numbers.append(line_number)
             except ValueError:
                 line_numbers.append(-1)  
+                print("line_number")
         return line_numbers
     except Exception as e:
         print(f"An error occurred while reading vref file: {e}")
@@ -126,8 +127,10 @@ def main():
     
     sim_scores = assess()
     save_sim_scores_to_file(sim_scores, "sim_scores.txt")
-    
+
     merge_files('data/vref.txt', 'sim_scores.txt', 'data/merged_results.txt')
+    merge_data_path = 'data/merged_results.txt'
+    removeverse(vref_file_path , merge_data_path)
 
 if __name__ == "__main__":
     main()
