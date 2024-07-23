@@ -44,7 +44,7 @@ def assess():
     import numpy as np
 
     revision_file_path = "data/aai-aai.txt"
-    reference_file_path = "data/aak-aak.txt"
+    reference_file_path = "data/aai-aai.txt"
 
     revision_text = get_text(revision_file_path)
     reference_text = get_text(reference_file_path)
