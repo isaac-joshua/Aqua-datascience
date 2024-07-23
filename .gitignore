@@ -1,0 +1,5 @@
+.venv
+__pycache__/local.cpython-310.pyc
+__pycache__/test.cpython-310.pyc
+__pycache__/triall.cpython-311.pyc
+.vscode/settings.json
